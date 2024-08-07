@@ -22,7 +22,7 @@ First, create folders with data (symbolic links) to be used for template constru
 mkdir template template/wm_fodfs template/gm template/csf template/masks
 while read -r i
 do
-	ln -sr wm_fodf_mt/${i}.mif template/wm_fodfs/${i}.mif
+    ln -sr wm_fodf_mt/${i}.mif template/wm_fodfs/${i}.mif
     ln -sr gm_mt/${i}.mif template/gm/${i}.mif
     ln -sr csf_mt/${i}.mif template/csf/${i}.mif
     ln -sr mask4fods/${i}.mif template/masks/${i}.mif
