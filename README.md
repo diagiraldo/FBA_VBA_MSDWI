@@ -15,11 +15,12 @@ We followed the [MRtrix3 documentation for DW-MRI pre-processing](https://mrtrix
 
 ## Multi-tissue decomposition
 
-## Multi-channel population template
+## Population template
 
 First, create folders with data (symbolic links) to be used for template construction: 
 ```
 mkdir template template/wm_fodfs template/gm template/csf template/masks
+
 while read -r i
 do
     ln -sr wm_fodf_mt/${i}.mif template/wm_fodfs/${i}.mif
@@ -28,16 +29,38 @@ do
     ln -sr mask4fods/${i}.mif template/masks/${i}.mif
 done < list_of_imgID_for_template.txt
 ```
-Then, calculate the template with [`population_template`](https://mrtrix.readthedocs.io/en/latest/reference/commands/population_template.html):
+Then, calculate the multi-channel template with [`population_template`](https://mrtrix.readthedocs.io/en/latest/reference/commands/population_template.html):
 ```
 population_template template/wm_fodfs template/wm_fodf_template.mif template/gm template/gm_template.mif template/csf template/csf_template.mif -mask_dir template/masks -voxel_size 1.25
 ```
-The template is composed of a WM-like fODF (`template/wm_fodf_template.mif`) along with the voxel-wise templates containing the tissue-like contributions for GM (`template/gm_template.mif`) and CSF (`template/csf_template.mif`).
-<img src="figures/mc_template.png?raw=True" width="600px" style="margin:0px 0px"/>
+The template is composed of a WM-like fODF (`template/wm_fodf_template.mif`) along with the voxel-wise templates containing the tissue-like contributions for GM (`template/gm_template.mif`) and CSF (`template/csf_template.mif`):
+<img src="figures/mc_template.png?raw=True" width="800px" style="margin:0px 0px"/>
 
-Then, you can extract the voxel-wise template for WM-like contribution from the WM-like fODF as the l=0 term of the spherical harmonic expansion:
+You can extract the voxel-wise template for WM-like contribution from the WM-like fODF as the l=0 term of the spherical harmonic expansion, and use it to create a WM voxel mask:
 ```
-mrconvert -coord 3 0 template/wm_fodf_template.mif template/wm_template.mif
+mrconvert -coord 3 0 -axes 0,1,2 template/wm_fodf_template.mif template/wm_template.mif
+
+mrthreshold template/wm_template.mif template/wm_voxel_mask.mif
+```
+
+Then, generate a WM fixel-mask with [`fod2fixel`](https://mrtrix.readthedocs.io/en/latest/reference/commands/fod2fixel.html):
+```
+fod2fixel -mask template/wm_voxel_mask.mif -fmls_peak_value 0.06 template/wm_fodf_template.mif template/wm_fixel_mask
+```
+
+### Generate template tractogram
+
+From the WM fODF template, generate a tractogram using the iFOD2 algorithm, the default option in [`tckgen`](https://mrtrix.readthedocs.io/en/latest/reference/commands/tckgen.html), and then use [`tcksift`](https://mrtrix.readthedocs.io/en/latest/reference/commands/tcksift.html) to reduce density biases in the tractogram:
+
+```
+tckgen -angle 22.5 -maxlen 250 -minlen 10 -power 1.0 -cutoff 0.06 template/wm_fodf_template.mif -seed_dynamic template/wm_fodf_template.mif -mask template/wm_voxel_mask.mif -select 10000000 template/tracto_10_million.tck
+
+tcksift template/tracto_10_million.tck template/wm_fodf_template.mif template/tracto_sift_2_million.tck -term_number 2000000
+```
+
+A tractogram with fewer streamlines might be useful for visualization purposes:
+```
+tckedit template/tracto_sift_2_million.tck -number 200000 template/tracto_sift_200k.tck
 ```
 
 ## Diffusion-derived measures
