@@ -15,7 +15,7 @@ We followed the [MRtrix3 documentation for DW-MRI pre-processing](https://mrtrix
 - Correction for head motion and eddy current-induced distortions
 - Bias-field correction
 
-**About masks**: We got the brain masks using T1-W MRI and then aligning it with the mean $b=0$ image from DW-MRI
+**About masks**: We got the brain masks using T1-W MRI and then aligning it with the mean $b=0$ image from DW-MRI. 
 
 After these steps we had our pre-processed MRIs inside a folder `preproc_dwi`:
  ```
@@ -184,7 +184,10 @@ for_each warp_sub2temp/* : warp2metric IN -jdet jdet_sub2temp/NAME
 for_each jdet_sub2temp/*.mif : mrcalc IN -log log_jdet_sub2temp/NAME
 ```
 
-Calculate tissue-like contributions in template space. Note that after spatial normalisation there might be small negative values, we need to cut those to avoid numerical errors later on.
+We calculated tissue-like contributions in template space. Note that after spatial normalisation there might be small negative values, so we cut those to avoid numerical errors later on.
+```
+
+```
 
 
 ## Statistical Analyses
