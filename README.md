@@ -76,7 +76,9 @@ mkdir wm_fodf_mt gm_mt csf_mt
 for_each wm_fodf/*.mif : mtnormalise IN wm_fodf_mt/NAME gm/NAME gm_mt/NAME csf/NAME csf_mt/NAME -mask masks_up/NAME 
 ```
 
-## Population template
+## Study-specific template
+
+We built a study-specific template with an unbiased subsample of our study sample.
 
 First, we created folders with the data (symbolic links) that we used for template construction: 
 ```
@@ -145,7 +147,9 @@ for_each csf_mt/*.mif : mrtransform IN -warp warp_sub2temp/NAME csf_intemplate/N
 
 ### Fixel-wise measures
 
-We first calculated the Apparent Fiber Density (AFD) with [`fod2fixel`](https://mrtrix.readthedocs.io/en/latest/reference/commands/fod2fixel.html):
+**Tissue constituency**: the integral of a fODF lobe is proportional to the volume of fibers aligned in the corresponding lobe direction; this measure is known as apparent fiber density (AFD).
+
+We first calculated the AFD with [`fod2fixel`](https://mrtrix.readthedocs.io/en/latest/reference/commands/fod2fixel.html):
 ```
 mkdir fixels_intemplate
 
@@ -163,7 +167,9 @@ Those fixels do not correspond (yet) to the template fixel mask, so we establish
 for_each fixels_intemplate/* : fixelcorrespondence -angle 30 IN/afd.mif template/wm_fixel_mask template/afd PRE.mif
 ```
 
-From the warp from subject to template, we calculated the Fiber Cross-section (FC) and log(FC):
+**Local morphology**: The measure that accounts for the effect of spatial normalization in each fiber direction is the change in the area perpendicular to that direction, also known as Fiber Cross-section (FC).
+
+From the warp from subject to template, we calculated the FC and log(FC):
 ```
 for_each warp_sub2temp/* : warp2metric IN -fc template/wm_fixel_mask template/fc NAME
 
@@ -177,6 +183,17 @@ Note that each measure is in a separate fixel folder containing the same `index.
 
 ### Voxel-wise measures
 
+**Tissue constituency**: Spatially normalized tissue-like contributions. Note that after spatial normalisation there might be small negative values, so we set the minimum contribution of each tissue-like component at 1e-8 to avoid numerical errors later on.
+```
+EPSILON=0.00000001
+mkdir wm_tf_intemplate gm_tf_intemplate csf_tf_intemplate
+
+for_each wm_fodf_intemplate/*.mif : mrconvert -coord 3 0 -axes 0,1,2 IN - "|" mrcalc - ${EPSILON} -ge - ${EPSILON} -if wm_tf_intemplate/NAME
+for_each gm_intemplate/*.mif : mrconvert -axes 0,1,2 IN - "|" mrcalc - ${EPSILON} -ge - ${EPSILON} -if gm_tf_intemplate/NAME
+for_each csf_intemplate/*.mif : mrconvert -axes 0,1,2 IN - "|" mrcalc - ${EPSILON} -ge - ${EPSILON} -if csf_tf_intemplate/NAME
+```
+
+**Local morphology**: change induced by the spatial normalization. 
 ```
 mkdir jdet_sub2temp log_jdet_sub2temp
 
@@ -184,15 +201,76 @@ for_each warp_sub2temp/* : warp2metric IN -jdet jdet_sub2temp/NAME
 for_each jdet_sub2temp/*.mif : mrcalc IN -log log_jdet_sub2temp/NAME
 ```
 
-We calculated tissue-like contributions in template space. Note that after spatial normalisation there might be small negative values, so we cut those to avoid numerical errors later on.
+**From contributions to fractions**: To ensure tissue costituency measures represent true fractions of the signal, we divided the tissue-like contributions and AFD by the sum of the three tissue-like contributions (WM + GM + CSF): 
+
+```
+mkdir sum_tf_intemplate
+
+for_each wm_tf_intemplate/*.mif : mrcalc IN gm_tf_intemplate/NAME -add csf_tf_intemplate/NAME -add sum_tf_intemplate/NAME
+
+for_each wm_tf_intemplate/*.mif : mrcalc IN sum_tf_intemplate/NAME -div wm_tf_intemplate/NAME -force
+for_each gm_tf_intemplate/*.mif : mrcalc IN sum_tf_intemplate/NAME -div gm_tf_intemplate/NAME -force
+for_each csf_tf_intemplate/*.mif : mrcalc IN sum_tf_intemplate/NAME -div csf_tf_intemplate/NAME -force
 ```
 
 ```
+mkdir template/sum_tf_infixels template/normafd
+cp template/wm_fixel_mask/* template/sum_tf_infixels/.
+cp template/wm_fixel_mask/* template/normafd/.
 
+for_each sum_tf_intemplate/*.mif : voxel2fixel IN template/sum_tf_infixels template/sum_tf_infixels NAME
+for_each template/afd/*.mif : mrcalc IN template/sum_tf_infixels/NAME -div template/normafd/NAME
+```
 
 ## Statistical Analyses
+We did non-parametric hypothesis testing using [`ficelcfestats`](https://mrtrix.readthedocs.io/en/dev/reference/commands/fixelcfestats.html) and [`mrclusterstats`](https://mrtrix.readthedocs.io/en/dev/reference/commands/mrclusterstats.html). 
+Steps: smoothing
 
-***
+### Fixel-based analysis
+
+Fixel connectivity matrix
+```
+fixelconnectivity template/wm_fixel_mask template/tracto_sift_2_million.tck template/wm_fixel_connectivity
+```
+
+Smooth fixel data with [`fixelfilter`](https://mrtrix.readthedocs.io/en/dev/reference/commands/fixelfilter.html)
+
+
+**Omnibus F-test**
+
+**Posthoc tests**
+
+### Voxel-based analysis
+
+We calculated the isometric log-ratios and smoothed (fwhm=5) them prior statistical analyses
+```
+mkdir smooth_ilr1 smooth_ilr2
+
+invsqrt6=0.4082483
+invsqrt2=0.7071068
+
+for_each wm_tf_intemplate/*.mif : mrcalc gm_tf_intemplate/NAME csf_tf_intemplate/NAME -mult IN 2 -pow -div -log ${invsqrt6} -mult - "|" mrfilter - smooth smooth_ilr1/NAME -fwhm 5
+for_each csf_tf_intemplate/*mif : mrcalc IN gm_tf_intemplate/NAME -div -log ${invsqrt2} -mult - "|" mrfilter - smooth smooth_ilr2/NAME -fwhm 5
+```
+
+We also smoothed the log(jdet) map
+```
+mkdir smooth_log_jdet
+
+for_each log_jdet_sub2temp/*mif : mrfilter IN smooth smooth_log_jdet/NAME -fwhm 5
+```
+
+**Omnibus F-test**
+```
+mrclusterstats info4stats/list_ilr_log_jdet_files.txt info4stats/design_ilr_log_jdet.txt info4stats/contrasts_ilr_log_jdet.txt info4stats/omniF_brain_voxel_mask.mif results_omniF_ilr_log_jdet/ -exchange_whole info4stats/ex_whole_ilr_log_jdet.txt -variance info4stats/var_gr_ilr_log_jdet.txt -ftests info4stats/omniF_ilr_log_jdet.txt -fonly -nthreads 20
+```
+
+**Posthoc tests**
+```
+mrthreshold results_omniF_ilr_log_jdet/fwe_1mpvalue.mif -abs 0.95 results_omniF_ilr_log_jdet/sig_mask.mif
+
+mrclusterstats -force info4stats/list_ilr_log_jdet_files.txt info4stats/design_ilr_log_jdet.txt info4stats/contrasts_ilr_log_jdet.txt results_omniF_ilr_log_jdet/sig_mask.mif results_post_ilr_log_jdet/ -exchange_whole info4stats/ex_whole_ilr_log_jdet.txt -variance info4stats/var_gr_ilr_log_jdet.txt -strong -nthreads 20
+```
 
 ## Citation
 
